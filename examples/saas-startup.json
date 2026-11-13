@@ -1,0 +1,25 @@
+{
+  "org_name": "Example SaaS Co",
+  "industry": "technology / SaaS",
+  "employees": "51-250",
+  "regions": ["EU", "US"],
+  "infrastructure": ["AWS", "SaaS-heavy", "Remote workforce", "In-house software"],
+  "data_types": ["PII", "Financial"],
+  "compliance": ["GDPR", "SOC 2"],
+  "controls": {
+    "mfa": true,
+    "email_security": true,
+    "patch_management": true,
+    "data_encryption": true,
+    "security_training": false,
+    "edr": false,
+    "offline_backups": false,
+    "incident_response_plan": false
+  },
+  "budget": "moderate",
+  "security_staff": 1,
+  "timeframe_months": 12,
+  "recent_incidents": "A phishing email led to one compromised mailbox last quarter.",
+  "concerns": "Ransomware, enterprise customer security questionnaires",
+  "goals": "Pass SOC 2 Type II within 9 months to unblock enterprise deals"
+}
