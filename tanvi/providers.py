@@ -5,7 +5,8 @@ Two client libraries cover almost every vendor:
 * ``anthropic`` - Claude models via the official Anthropic SDK.
 * ``openai``    - OpenAI itself plus every service that exposes an
   OpenAI-compatible Chat Completions endpoint (Gemini, Groq, OpenRouter,
-  Mistral, DeepSeek, Together, and local runtimes such as Ollama / LM Studio).
+  Mistral, DeepSeek, Together, the Hugging Face Inference router, and local
+  runtimes such as Ollama / LM Studio).
 
 API keys are passed per call and are never stored or logged by this module.
 """
@@ -67,6 +68,9 @@ PROVIDERS: dict[str, ProviderSpec] = {
         ProviderSpec("together", "Together AI", "openai_compatible",
                      "meta-llama/Llama-3.3-70B-Instruct-Turbo", "TOGETHER_API_KEY",
                      "https://api.together.xyz/v1", docs_url="https://api.together.ai/settings/api-keys"),
+        ProviderSpec("huggingface", "Hugging Face", "openai_compatible", "openai/gpt-oss-120b",
+                     "HF_TOKEN", "https://router.huggingface.co/v1",
+                     docs_url="https://huggingface.co/settings/tokens"),
         ProviderSpec("ollama", "Ollama (local)", "openai_compatible", "llama3.1",
                      None, "http://localhost:11434/v1", needs_key=False,
                      docs_url="https://ollama.com/"),
@@ -74,7 +78,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
                      None, "http://localhost:1234/v1", needs_key=False,
                      docs_url="https://lmstudio.ai/"),
         ProviderSpec("custom", "Custom OpenAI-compatible", "openai_compatible", "",
-                     "SECPLAN_CUSTOM_API_KEY", None, needs_key=False),
+                     "TANVI_CUSTOM_API_KEY", None, needs_key=False),
     ]
 }
 
@@ -98,6 +102,33 @@ def resolve_key(spec: ProviderSpec, api_key: str | None) -> str | None:
     if spec.env_key:
         return os.environ.get(spec.env_key) or None
     return None
+
+
+def list_models(provider_id: str, *, api_key: str | None = None,
+                base_url: str | None = None, limit: int = 500) -> list[str]:
+    """Return the model ids a provider currently offers, sorted by name."""
+    spec = get_provider(provider_id)
+    key = resolve_key(spec, api_key)
+    try:
+        if spec.kind == "anthropic":
+            import anthropic
+
+            if not key:
+                raise ProviderError(f"{spec.name} needs an API key to list models.")
+            ids = [m.id for m in anthropic.Anthropic(api_key=key).models.list(limit=100)]
+        else:
+            import openai
+
+            url = (base_url or spec.base_url or "").strip()
+            if not url:
+                raise ProviderError("A base URL is required for a custom provider.")
+            client = openai.OpenAI(api_key=key or "not-needed", base_url=url, timeout=20)
+            ids = [m.id for m in client.models.list()]
+    except ProviderError:
+        raise
+    except Exception as e:  # SDK errors vary by vendor; surface a short message.
+        raise ProviderError(f"Could not list {spec.name} models: {type(e).__name__}") from None
+    return sorted(set(ids), key=str.lower)[:limit]
 
 
 def stream_chat(

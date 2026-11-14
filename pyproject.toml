@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "secplan"
+name = "tanvi"
 version = "0.1.0"
 description = "Open-source security strategy planner that works with any AI provider (bring your own API key)."
 readme = "README.md"
@@ -21,13 +21,13 @@ dependencies = [
 dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
-secplan = "secplan.cli:main"
+tanvi = "tanvi.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["secplan*"]
+include = ["tanvi*"]
 
 [tool.setuptools.package-data]
-secplan = ["web/*"]
+tanvi = ["web/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

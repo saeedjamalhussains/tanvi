@@ -58,11 +58,11 @@ function readProfile() {
   };
 }
 
-function saveProfile() { store.set("secplan.profile", JSON.stringify(readProfile())); }
+function saveProfile() { store.set("tanvi.profile", JSON.stringify(readProfile())); }
 
 function restoreProfile() {
   let p;
-  try { p = JSON.parse(store.get("secplan.profile") || "null"); } catch { p = null; }
+  try { p = JSON.parse(store.get("tanvi.profile") || "null"); } catch { p = null; }
   if (!p) return;
   const f = $("#profile");
   for (const k of ["org_name", "industry", "employees", "budget", "security_staff",
@@ -85,38 +85,81 @@ function scheduleBaseline() {
   baselineTimer = setTimeout(runBaseline, 150);
 }
 
+const VERDICTS = {
+  1: "Early stage. A few foundational safeguards would remove most of your risk.",
+  2: "Making progress. Close the critical gaps below to reach a dependable baseline.",
+  3: "A solid foundation. Finish the remaining gaps and test what you already have.",
+  4: "A strong posture. Keep your safeguards tested and reviewed.",
+};
+let allGaps = [];
+let showAllGaps = false;
+
 async function runBaseline() {
   saveProfile();
+  updateStepMeta();
   const res = await fetch("/api/baseline", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(readProfile()),
   });
   if (!res.ok) return;
   const b = await res.json();
+
+  const ring = $("#ring");
+  ring.style.setProperty("--p", b.maturity_score);
+  ring.dataset.tier = b.tier;
   $("#score").textContent = b.maturity_score;
   $("#tier").textContent = `Tier ${b.tier} · ${b.tier_name}`;
-  $("#coverage").innerHTML = Object.entries(b.csf_coverage).map(([fn, pct]) =>
-    `<div class="cov"><div>${fn} <span class="muted">${pct}%</span></div>` +
-    `<div class="bar"><i style="width:${pct}%"></i></div></div>`).join("");
-  const gaps = $("#gaps");
-  gaps.innerHTML = "";
-  if (!b.gaps.length) gaps.innerHTML = "<li>No gaps in the baseline catalogue.</li>";
-  for (const g of b.gaps.slice(0, 6)) {
-    const li = document.createElement("li");
-    li.title = g.why;
-    li.textContent = g.name;
-    li.insertAdjacentHTML("beforeend", ` <span class="sev ${g.severity}">${g.severity}</span>`);
-    gaps.append(li);
-  }
-  const risks = $("#risks");
-  risks.innerHTML = "";
-  for (const r of b.risk_drivers.slice(0, 6)) {
-    const li = document.createElement("li");
-    li.title = r.reason;
-    li.textContent = `${r.threat} `;
-    li.insertAdjacentHTML("beforeend", `<span class="risk-score">${r.score}/10</span>`);
-    risks.append(li);
-  }
+  $("#verdict").textContent = VERDICTS[b.tier];
+  const total = b.in_place.length + b.gaps.length;
+  const critical = b.gaps.filter((g) => g.severity === "critical").length;
+  $("#stats").innerHTML =
+    `<span class="stat"><b>${b.in_place.length}</b> of ${total} safeguards in place</span>` +
+    (critical ? `<span class="stat bad"><b>${critical}</b> critical gap${critical > 1 ? "s" : ""}</span>` : "");
+
+  $("#coverage").innerHTML = Object.entries(b.csf_coverage).map(([fn, pct]) => {
+    const cls = pct >= 70 ? "ok" : pct >= 40 ? "mid" : "";
+    return `<div class="cov"><span>${fn}</span>` +
+      `<div class="bar"><i class="${cls}" style="width:${Math.max(pct, 2)}%"></i></div>` +
+      `<span class="pct">${pct}%</span></div>`;
+  }).join("");
+
+  allGaps = b.gaps;
+  renderGaps();
+
+  $("#risks").innerHTML = b.risk_drivers.slice(0, 5).map((r) => {
+    const cls = r.score >= 8 ? "" : r.score >= 5 ? "mid" : "ok";
+    return `<li class="risk"><div class="risk-top"><span>${escapeHtml(r.threat)}</span>` +
+      `<span class="risk-score">${r.score} / 10</span></div>` +
+      `<div class="bar"><i class="${cls}" style="width:${r.score * 10}%"></i></div>` +
+      `<div class="risk-why">${escapeHtml(r.reason)}</div></li>`;
+  }).join("");
+}
+
+function renderGaps() {
+  const list = showAllGaps ? allGaps : allGaps.slice(0, 5);
+  $("#gaps").innerHTML = allGaps.length
+    ? list.map((g) =>
+        `<li class="gap"><div class="gap-top"><span class="gap-name">${escapeHtml(g.name)}</span>` +
+        `<span class="pill ${g.severity}">${g.severity}</span></div>` +
+        `<div class="gap-why">${escapeHtml(g.why)}</div>` +
+        `<div class="gap-ref">${g.function} · ${escapeHtml(g.cis)}</div></li>`).join("")
+    : `<li class="gap done">Every safeguard in the catalogue is in place. Nice work.</li>`;
+  const more = $("#moreGaps");
+  more.hidden = allGaps.length <= 5;
+  more.textContent = showAllGaps ? "Show fewer" : `Show all ${allGaps.length} gaps`;
+}
+
+function updateStepMeta() {
+  const p = readProfile();
+  const meta = (k, text) => { const el = document.querySelector(`[data-meta="${k}"]`); if (el) el.textContent = text; };
+  meta("basics", [p.industry, `${p.employees} people`].join(" · "));
+  const env = p.infrastructure.length + p.data_types.length + p.compliance.length;
+  meta("env", env ? `${env} selected` : "");
+  const total = Object.keys(p.controls).length;
+  const have = Object.values(p.controls).filter(Boolean).length;
+  meta("controls", `${have} / ${total}`);
+  const ctx = [p.recent_incidents, p.concerns, p.goals].filter(Boolean).length;
+  meta("context", ctx ? `${ctx} filled` : "");
 }
 
 // ---------- provider settings ----------
@@ -126,37 +169,68 @@ async function loadProviders() {
   providers = data.providers.filter((p) => p.id !== "custom" || data.custom_base_url_allowed);
   const sel = $("#provider");
   sel.innerHTML = providers.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
-  sel.value = store.get("secplan.provider") || "anthropic";
+  sel.value = store.get("tanvi.provider") || "anthropic";
   if (!sel.value) sel.value = providers[0].id;
   $("#baseUrl").disabled = !data.custom_base_url_allowed;
   applyProvider();
 }
 
 function current() { return providers.find((p) => p.id === $("#provider").value); }
-const keySlot = (id) => `secplan.key.${id}`;
+const keySlot = (id) => `tanvi.key.${id}`;
 
 function applyProvider() {
   const p = current();
-  store.set("secplan.provider", p.id);
-  $("#model").value = store.get(`secplan.model.${p.id}`) || p.default_model;
+  store.set("tanvi.provider", p.id);
+  $("#model").value = store.get(`tanvi.model.${p.id}`) || p.default_model;
   $("#model").placeholder = p.default_model || "model name";
   const local = !p.needs_key;
   $("#baseUrlWrap").hidden = !(p.id === "custom" || local);
-  $("#baseUrl").value = store.get(`secplan.base.${p.id}`) || p.base_url || "";
+  $("#baseUrl").value = store.get(`tanvi.base.${p.id}`) || p.base_url || "";
   const saved = store.get(keySlot(p.id));
   $("#apiKey").value = saved || "";
   $("#rememberKey").checked = !!saved;
   $("#apiKey").placeholder = local ? "Not needed for local models" : "Paste your API key";
+  $("#modelList").innerHTML = "";
+  $("#modelHint").textContent = p.id === "huggingface"
+    ? "Any chat model served by Hugging Face Inference Providers. Click Browse to pick one."
+    : "";
   const hints = [];
   if (p.key_in_env) hints.push(`Server already has ${p.env_key} set; leave blank to use it.`);
   if (p.docs_url) hints.push(`<a href="${p.docs_url}" target="_blank" rel="noopener">Get a key</a>`);
   $("#keyHint").innerHTML = hints.join(" · ");
 }
 
+async function browseModels() {
+  const p = current();
+  const btn = $("#browseModels");
+  btn.disabled = true;
+  btn.textContent = "Loading…";
+  showError("");
+  const headers = { "Content-Type": "application/json" };
+  const key = $("#apiKey").value.trim();
+  if (key) headers["X-API-Key"] = key;
+  try {
+    const res = await fetch("/api/models", {
+      method: "POST", headers,
+      body: JSON.stringify({ provider: p.id, base_url: $("#baseUrlWrap").hidden ? "" : $("#baseUrl").value.trim() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Could not load models");
+    $("#modelList").innerHTML = data.models.map((m) => `<option value="${escapeHtml(m)}">`).join("");
+    $("#modelHint").textContent = `${data.models.length} models available. Click the model box to choose one, or type to filter.`;
+    $("#model").focus();
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Browse";
+  }
+}
+
 function persistSettings() {
   const p = current();
-  store.set(`secplan.model.${p.id}`, $("#model").value.trim());
-  if ($("#baseUrl").value.trim()) store.set(`secplan.base.${p.id}`, $("#baseUrl").value.trim());
+  store.set(`tanvi.model.${p.id}`, $("#model").value.trim());
+  if ($("#baseUrl").value.trim()) store.set(`tanvi.base.${p.id}`, $("#baseUrl").value.trim());
   if ($("#rememberKey").checked && $("#apiKey").value.trim()) {
     store.set(keySlot(p.id), $("#apiKey").value.trim());
   } else {
@@ -170,6 +244,22 @@ function render(md, streaming) {
   out.classList.remove("empty");
   out.innerHTML = DOMPurify.sanitize(marked.parse(md));
   out.classList.toggle("cursor", streaming);
+  buildToc(streaming);
+}
+
+function buildToc(streaming) {
+  const toc = $("#toc");
+  const heads = [...$("#output").querySelectorAll("h2")];
+  if (streaming || heads.length < 3) { toc.hidden = true; return; }
+  toc.innerHTML = "";
+  heads.forEach((h, i) => {
+    h.id = `sec-${i}`;
+    const a = document.createElement("a");
+    a.href = `#sec-${i}`;
+    a.textContent = h.textContent.replace(/^\d+\.\s*/, "");
+    toc.append(a);
+  });
+  toc.hidden = false;
 }
 
 function setBusy(busy) {
@@ -234,7 +324,7 @@ async function generate(followup = "") {
       $("#followupForm").hidden = false;
     }
     render(transcriptMd || prior, false);
-    if (!transcriptMd) $("#output").classList.add("empty");
+    if (!transcriptMd) { $("#output").classList.add("empty"); $("#output").textContent = "Your plan will appear here."; }
     setBusy(false);
   }
 }
@@ -259,6 +349,8 @@ async function init() {
   $("#profile").addEventListener("submit", (e) => e.preventDefault());
   $("#provider").addEventListener("change", applyProvider);
   $("#rememberKey").addEventListener("change", persistSettings);
+  $("#browseModels").addEventListener("click", browseModels);
+  $("#moreGaps").addEventListener("click", () => { showAllGaps = !showAllGaps; renderGaps(); });
   $("#generate").addEventListener("click", () => generate());
   $("#stop").addEventListener("click", () => controller && controller.abort());
   $("#followupForm").addEventListener("submit", (e) => {

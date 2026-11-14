@@ -1,4 +1,4 @@
-"""Command-line interface: `secplan serve`, `secplan baseline`, `secplan plan`."""
+"""Command-line interface: `tanvi serve`, `tanvi baseline`, `tanvi plan`."""
 
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
     if args.host not in ("127.0.0.1", "localhost"):
-        print("Warning: serving beyond localhost. Set SECPLAN_ALLOW_CUSTOM_BASE_URL=0 "
-              "and put SecPlan behind authentication.", file=sys.stderr)
-    uvicorn.run("secplan.server:app", host=args.host, port=args.port, reload=args.reload)
+        print("Warning: serving beyond localhost. Set TANVI_ALLOW_CUSTOM_BASE_URL=0 "
+              "and put Tanvi behind authentication.", file=sys.stderr)
+    uvicorn.run("tanvi.server:app", host=args.host, port=args.port, reload=args.reload)
     return 0
 
 
@@ -55,7 +55,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="secplan", description="AI-assisted security strategy planner")
+    parser = argparse.ArgumentParser(prog="tanvi", description="AI-assisted security strategy planner")
     sub = parser.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("serve", help="run the web app")

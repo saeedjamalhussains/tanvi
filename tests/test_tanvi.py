@@ -4,10 +4,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from secplan import providers, server
-from secplan.baseline import CATALOG, assess
-from secplan.models import OrgProfile
-from secplan.prompts import build_plan_prompt
+from tanvi import providers, server
+from tanvi.baseline import CATALOG, assess
+from tanvi.models import OrgProfile
+from tanvi.prompts import build_plan_prompt
 
 EXAMPLE = json.loads((Path(__file__).parent.parent / "examples" / "saas-startup.json").read_text())
 
@@ -101,7 +101,7 @@ def test_followup_required_when_continuing(client):
 
 
 def test_custom_base_url_can_be_disabled(client, monkeypatch):
-    monkeypatch.setenv("SECPLAN_ALLOW_CUSTOM_BASE_URL", "0")
+    monkeypatch.setenv("TANVI_ALLOW_CUSTOM_BASE_URL", "0")
     res = client.post("/api/plan", json={
         "profile": EXAMPLE, "provider": "custom", "model": "x", "base_url": "http://10.0.0.1/v1"})
     assert res.status_code == 400
@@ -122,4 +122,32 @@ def test_env_key_used_when_none_supplied(monkeypatch):
 def test_index_served(client):
     res = client.get("/")
     assert res.status_code == 200
-    assert "SecPlan" in res.text
+    assert "Tanvi" in res.text
+
+
+def test_huggingface_provider_uses_router():
+    spec = providers.get_provider("huggingface")
+    assert spec.kind == "openai_compatible"
+    assert spec.base_url == "https://router.huggingface.co/v1"
+    assert spec.env_key == "HF_TOKEN"
+
+
+def test_models_endpoint_passes_key(client, monkeypatch):
+    seen = {}
+
+    def fake_list(provider_id, *, api_key, base_url):
+        seen.update(provider=provider_id, api_key=api_key)
+        return ["meta-llama/Llama-3.3-70B-Instruct", "openai/gpt-oss-120b"]
+
+    monkeypatch.setattr(server, "list_models", fake_list)
+    res = client.post("/api/models", headers={"X-API-Key": "hf_test"},
+                      json={"provider": "huggingface"})
+    assert res.status_code == 200
+    assert "openai/gpt-oss-120b" in res.json()["models"]
+    assert seen == {"provider": "huggingface", "api_key": "hf_test"}
+
+
+def test_models_endpoint_errors_are_clean_400(client):
+    res = client.post("/api/models", json={"provider": "custom"})
+    assert res.status_code == 400
+    assert "base URL" in res.json()["detail"]

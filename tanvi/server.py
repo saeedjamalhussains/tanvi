@@ -16,11 +16,11 @@ from . import __version__
 from .baseline import assess, catalog_public
 from .models import OrgProfile
 from .prompts import SYSTEM_PROMPT, build_plan_prompt
-from .providers import PROVIDERS, ProviderError, stream_chat
+from .providers import PROVIDERS, ProviderError, list_models, stream_chat
 
 WEB_DIR = Path(__file__).parent / "web"
 
-app = FastAPI(title="SecPlan", version=__version__, docs_url="/api/docs")
+app = FastAPI(title="Tanvi", version=__version__, docs_url="/api/docs")
 
 
 class Turn(BaseModel):
@@ -39,10 +39,15 @@ class PlanRequest(BaseModel):
     followup: str = Field("", max_length=4000)
 
 
+class ModelsRequest(BaseModel):
+    provider: str
+    base_url: str = ""
+
+
 def _custom_base_urls_allowed() -> bool:
     # Pointing the server at arbitrary URLs is fine on your own machine, but
-    # should be switched off when SecPlan is hosted for other people.
-    return os.environ.get("SECPLAN_ALLOW_CUSTOM_BASE_URL", "1") != "0"
+    # should be switched off when Tanvi is hosted for other people.
+    return os.environ.get("TANVI_ALLOW_CUSTOM_BASE_URL", "1") != "0"
 
 
 @app.get("/api/health")
@@ -66,6 +71,17 @@ def controls() -> list[dict]:
 @app.post("/api/baseline")
 def baseline(profile: OrgProfile) -> dict:
     return assess(profile)
+
+
+@app.post("/api/models")
+def models(req: ModelsRequest, x_api_key: str | None = Header(default=None)) -> dict:
+    if req.base_url and not _custom_base_urls_allowed():
+        raise HTTPException(400, "Custom base URLs are disabled on this server.")
+    try:
+        return {"models": list_models(req.provider, api_key=x_api_key,
+                                      base_url=req.base_url or None)}
+    except ProviderError as e:
+        raise HTTPException(400, str(e)) from None
 
 
 @app.post("/api/plan")
